@@ -6,14 +6,19 @@ import signal
 from bs4 import BeautifulSoup
 
 class UnaxBot(irc.bot.SingleServerIRCBot):
+
+
     def __init__(self, channel, nickname, realname, server, port, debug=False):
-        super().__init__([(server, port)], nickname, realname)
+        print(f"Starting (debug={debug})")
         self.channel = channel
         self.debug = debug
-        print(f"Starting (debug={debug})")
+        self.refresh = True
+        super().__init__([(server, port)], nickname, realname)
+
 
     def on_welcome(self, c, e):
         c.join(self.channel)
+
 
     def on_privmsg(self, c, e):
         message = e.arguments[0]
@@ -26,6 +31,7 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
         #if sender in self.channels[self.channel].users():
         #    self.process_links(c, message)
 
+
     def on_pubmsg(self, c, e):
         message = e.arguments[0]
         sender = e.source.nick
@@ -37,28 +43,29 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
         if target == self.channel.lower():
             self.process_links(c, message)
 
+
     def process_links(self, c, message):
-        twitter_regex = re.compile(r'''
-            (https?://
-              (?:               # List of domains
-                twitter\.com
-              )
-              /\S+              # Username
-              /status
-              /\d+              # Status ID
-            )''', re.IGNORECASE|re.X)
-        link_regex = re.compile(r'''
-            (https?://(?:www\.)?
-              (?: # List of domains
-                [-a-z0-9]+\.(?:de|dk|ee|fi|no|se)
-                |mastodon\.social
-                |threadreaderapp\.com
-                |twitter\.com
-                |youtu\.be
-                |youtube\.com
-              )
-              /[a-z0-9@#%&+.=/?-]*
-            )''', re.IGNORECASE|re.X)
+        if self.refresh:
+            print("Refreshing domain lists")
+            self.read_domain_files()
+
+        twitter_regex = re.compile(
+          r"(https?://(?:"
+          + self.twitter_domains
+          + r")/\S+/status/\d+)",
+          re.IGNORECASE
+        )
+        if self.debug:
+            print(f"Twitter regex: {twitter_regex.pattern}")
+
+        link_regex = re.compile(
+          r"(https?://(?:www\.)?(?:"
+          + self.link_domains
+          + r")/[a-z0-9@#%&+.=/?-]*)",
+          re.IGNORECASE
+        )
+        if self.debug:
+            print(f"Link regex: {link_regex.pattern}")
 
         twitter_links = twitter_regex.findall(message)
         approved_links = link_regex.findall(message)
@@ -67,11 +74,15 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
             threadreader_link = self.get_threadreader_link(link)
             if threadreader_link:
                 c.privmsg(self.channel, f"See also: {threadreader_link}")
+                link_title = self.get_link_title(threadreader_link)
+                if link_title:
+                    c.privmsg(self.channel, f"Title: {link_title}")
 
         for link in approved_links:
             link_title = self.get_link_title(link)
             if link_title:
                 c.privmsg(self.channel, f"Title: {link_title}")
+
 
     def get_threadreader_link(self, tweet_link):
         try:
@@ -84,11 +95,12 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
             print("Error retrieving ThreadReaderApp link:", e)
             return None
 
+
     def get_link_title(self, link):
         try:
             response = requests.get(link)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            title_tag = soup.find('title')
+            soup = BeautifulSoup(response.text, "html.parser")
+            title_tag = soup.find("title")
             if title_tag:
                 return title_tag.string.strip()
             else:
@@ -97,34 +109,63 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
             print("Error retrieving link title:", e)
             return None
 
+
+    def read_domain_files(self):
+        twitter_domain_file = open("domains-twitter.txt", "r")
+        twitter_domains = twitter_domain_file.read().splitlines()
+        twitter_domain_file.close()
+        self.twitter_domains = "|".join(twitter_domains)
+
+        link_domain_file = open("domains-links.txt", "r")
+        link_domains = link_domain_file.read().splitlines()
+        link_domain_file.close()
+        self.link_domains = "|".join(link_domains)
+
+        self.refresh = False
+
+
+    def refresh_bot(self, signum, frame):
+        sig = signal.Signals(signum).name
+        print(f"Received {sig}. Requesting refresh.")
+        self.refresh = True
+
+
     def reconnect_bot(self, signum, frame):
-        print("Received SIGHUP. Shutting down gracefully.")
+        sig = signal.Signals(signum).name
+        print(f"Received {sig}. Reconnecting.")
         self.disconnect()
 
+
     def stop_bot(self, signum, frame):
-        print("Received SIGTERM. Shutting down gracefully.")
+        sig = signal.Signals(signum).name
+        print(f"Received {sig}. Shutting down gracefully.")
         self.die()
+
 
     def keyboard_interrupt(self):
         print("Received a keyboard interrupt. Shutting down gracefully.")
         self.die()
 
+
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="IRC bot to process Twitter and YouTube links.")
+    parser = argparse.ArgumentParser(description="IRC bot to process weblinks.")
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("channel", help="IRC channel to join")
     parser.add_argument("nickname", help="Nickname of the bot")
     parser.add_argument("realname", help="Real name of the bot")
     parser.add_argument("server", help="IRC server address")
-    parser.add_argument("port", type=int, help="IRC server port")
-    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("port", type=int, nargs="?", default=6667, help="IRC server port")
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_arguments()
     bot = UnaxBot(args.channel, args.nickname, args.realname, args.server, args.port, args.debug)
 
     signal.signal(signal.SIGTERM, bot.stop_bot)
-    signal.signal(signal.SIGHUP, bot.reconnect_bot)
+    signal.signal(signal.SIGHUP,  bot.stop_bot)
+    signal.signal(signal.SIGUSR1, bot.refresh_bot)
+    signal.signal(signal.SIGUSR2, bot.reconnect_bot)
 
     try:
         bot.start()

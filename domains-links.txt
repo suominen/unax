@@ -1,0 +1,10 @@
+[-a-z0-9]+\.(?:de|dk|ee|fi|no|se)
+(?:[-a-z0-9]+\.)?netbsd\.org
+(?:[-a-z0-9]+\.)?suominen\.(?:com|org)
+bbc\.(?:co\.uk|com)
+mastodon\.social
+selonen\.org
+theguardian\.com
+threadreaderapp\.com
+youtu\.be
+youtube\.com
