@@ -86,28 +86,36 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
 
     def get_threadreader_link(self, tweet_link):
         try:
-            response = requests.get(f"https://threadreaderapp.com/thread/{tweet_link.split('/')[-1]}", allow_redirects=False)
-            if response.status_code == 200:
-                return response.url
-            else:
-                return None
+            response = requests.get(
+              f"https://threadreaderapp.com/thread/{tweet_link.split('/')[-1]}",
+              allow_redirects=False
+            )
         except Exception as e:
             print("Error retrieving ThreadReaderApp link:", e)
             return None
 
+        if not response.status_code == 200:
+            return None
+
+        return response.url
+
 
     def get_link_title(self, link):
+        user_agent = {"User-agent": "Mozilla/5.0"}
         try:
-            response = requests.get(link)
-            soup = BeautifulSoup(response.text, "html.parser")
-            title_tag = soup.find("title")
-            if title_tag:
-                return title_tag.string.strip()
-            else:
-                return None
+            response = requests.get(link, headers=user_agent)
         except Exception as e:
             print("Error retrieving link title:", e)
+
+        if not response.status_code == 200:
+            print(f"{response.status_code} from {link}")
             return None
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        if not soup.title:
+            return None
+
+        return soup.title.text.strip()
 
 
     def read_domain_files(self):
