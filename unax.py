@@ -49,6 +49,15 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
             print("Refreshing domain lists")
             self.read_domain_files()
 
+        bsky_regex = re.compile(
+          r"(https?://(?:"
+          + self.bsky_domains
+          + r")/\S+)",
+          re.IGNORECASE
+        )
+        if self.debug:
+            print(f"Bluesky regex: {bsky_regex.pattern}")
+
         twitter_regex = re.compile(
           r"(https?://(?:"
           + self.twitter_domains
@@ -67,8 +76,14 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
         if self.debug:
             print(f"Link regex: {link_regex.pattern}")
 
+        bsky_links = bsky_regex.findall(message)
         twitter_links = twitter_regex.findall(message)
         approved_links = link_regex.findall(message)
+
+        for link in bsky_links:
+            content = self.get_bsky_description(link)
+            if content:
+                c.privmsg(self.channel, f">>> {content}")
 
         for link in twitter_links:
             threadreader_link = self.get_threadreader_link(link)
@@ -84,10 +99,38 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
                 c.privmsg(self.channel, f"Title: {link_title}")
 
 
-    def get_threadreader_link(self, tweet_link):
+    def get_bsky_description(self, link):
+        user_agent = {"User-agent": "Mozilla/5.0"}
+        try:
+            response = requests.get(link, headers=user_agent)
+        except Exception as e:
+            print("Error retrieving link title:", e)
+            return None
+
+        if not response.status_code == 200:
+            print(f"{response.status_code} from {link}")
+            return None
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        if not soup:
+            return None
+
+        meta_tag = soup.find("meta", property="og:description")
+        if not meta_tag:
+            return None
+
+        content = meta_tag["content"].strip()
+        nl = content.find('\n')
+        if nl > 0:
+            return content[:nl]
+
+        return content
+
+
+    def get_threadreader_link(self, link):
         try:
             response = requests.get(
-              f"https://threadreaderapp.com/thread/{tweet_link.split('/')[-1]}",
+              f"https://threadreaderapp.com/thread/{link.split('/')[-1]}",
               allow_redirects=False
             )
         except Exception as e:
@@ -106,6 +149,7 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
             response = requests.get(link, headers=user_agent)
         except Exception as e:
             print("Error retrieving link title:", e)
+            return None
 
         if not response.status_code == 200:
             print(f"{response.status_code} from {link}")
@@ -119,6 +163,11 @@ class UnaxBot(irc.bot.SingleServerIRCBot):
 
 
     def read_domain_files(self):
+        bsky_domain_file = open("domains-bsky.txt", "r")
+        bsky_domains = bsky_domain_file.read().splitlines()
+        bsky_domain_file.close()
+        self.bsky_domains = "|".join(bsky_domains)
+
         twitter_domain_file = open("domains-twitter.txt", "r")
         twitter_domains = twitter_domain_file.read().splitlines()
         twitter_domain_file.close()
